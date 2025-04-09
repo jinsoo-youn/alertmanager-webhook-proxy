@@ -1,0 +1,199 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    release: prometheus
+  name: {{ include "alertmanager-webhook-proxy.fullname" . }}
+spec:
+  groups:
+    - name: IaaS
+      rules:
+        ## IaaS_TooMany500s
+        - alert: IaaSTooMany500s
+          annotations:
+            description: Too many 5XXs
+            summary: More than 10% of all requests returned 5XX, this requires your attention
+          expr: |-
+            100 * (
+            sum by (exported_namespace,exported_service,ingress,host,exported_service) (increase(nginx_ingress_controller_requests{status=~"5.+",exported_namespac=~"{{ .Values.matchNamespaces | join "|" }}"}[2m]))
+            /
+            sum by (exported_namespace,exported_service,ingress,host,exported_service) (increase(nginx_ingress_controller_requests{exported_namespace=~"{{ .Values.matchNamespaces | join "|" }}"}[2m]))
+            ) > 10
+          for: 1m
+          labels:
+            severity: warning
+
+        ## IaaS_TooMany400s
+        - alert: IaaSTooMany400s
+          annotations:
+            description: Too many 4XXs
+            summary: More than 10% of all requests returned 4XX, this requires your attention
+          expr: |-
+            100 * (
+            sum by (exported_namespace,exported_service,ingress,host,exported_service) (increase(nginx_ingress_controller_requests{status=~"4.+",exported_namespace=~"{{ .Values.matchNamespaces | join "|" }}"}[2m]))
+            /
+            sum by (exported_namespace,exported_service,ingress,host,exported_service) (increase(nginx_ingress_controller_requests{exported_namespace=~"{{ .Values.matchNamespaces | join "|" }}"}[2m]))
+            ) > 10
+          for: 1m
+          labels:
+            severity: warning
+
+        ## IaaSPodCrashLooping
+        - alert: IaaSPodCrashLooping
+          annotations:
+            description: 'Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} is crash looping.'
+            summary: Pod is crash looping.
+          expr: |
+            max_over_time(
+              kube_pod_container_status_waiting_reason{
+                reason="CrashLoopBackOff",
+                job="kube-state-metrics",
+                namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+              }[5m]
+            ) >= 1
+          for: 5m
+          labels:
+            severity: critical
+
+        ## IaaSPodNotReady
+        - alert: IaaSPodNotReady
+          annotations:
+            description: Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been in a non-ready state for longer than 3 minutes.
+            summary: Pod has been in a non-ready state for more than 3 minutes.
+          expr: |
+            sum by (namespace, pod, cluster) (
+              max by(namespace, pod, cluster) (
+                kube_pod_status_phase{
+                  job="kube-state-metrics",
+                  namespace=~"{{ .Values.matchNamespaces | join "|" }}",
+                  phase=~"Pending|Unknown|Failed"
+                }
+              ) * on(namespace, pod, cluster) group_left(owner_kind) topk by(namespace, pod, cluster) (
+                1,
+                max by(namespace, pod, owner_kind, cluster) (
+                  kube_pod_owner{owner_kind!="Job"}
+                )
+              )
+            ) > 0
+          for: 3m
+          labels:
+            severity: critical
+
+        ## IaaSContainerWaiting
+        - alert: IaaSContainerWaiting
+          annotations:
+            description: pod/{{ "{{" }} $labels.pod {{ "}}" }} in namespace {{ "{{" }} $labels.namespace {{ "}}" }} on container {{ "{{" }} $labels.container {{ "}}" }} has been in waiting state for longer than 30 min.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontainerwaiting
+            summary: Pod container waiting longer than 30 min
+          expr: sum by (namespace, pod, container, cluster) (
+            kube_pod_container_status_waiting_reason{
+            job="kube-state-metrics",
+            namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+            }
+          ) > 0
+          for: 10m
+          labels:
+            severity: warning
+
+        ## IaaSDeploymentGenerationMismatch
+        - alert: IaaSDeploymentGenerationMismatch
+          annotations:
+            description: Deployment generation for {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.deployment {{ "}}" }} does not match.
+            summary: Deployment generation mismatch.
+          expr: |
+            kube_deployment_status_observed_generation{
+              job="kube-state-metrics",
+              namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+            } !=
+            kube_deployment_metadata_generation{
+              job="kube-state-metrics",
+              namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+            }
+          for: 5m
+          labels:
+            severity: warning
+
+        ## IaaSStatefulSetReplicasMismatch
+        - alert: IaaSStatefulSetReplicasMismatch
+          annotations:
+            description: StatefulSet {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.statefulset {{ "}}" }} does not match expected replicas.
+            summary: StatefulSet replicas mismatch.
+          expr: |
+            (
+              kube_statefulset_status_replicas_ready{
+                job="kube-state-metrics",
+                namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+              } !=
+              kube_statefulset_status_replicas{
+                job="kube-state-metrics",
+                namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+              }
+            ) and (
+              changes(kube_statefulset_status_replicas_updated{
+                job="kube-state-metrics",
+                namespace=~"{{ .Values.matchNamespaces | join "|" }}"
+              }[10m]) == 0
+            )
+          for: 5m
+          labels:
+            severity: warning
+
+        ## IaaSDeploymentReplicasMismatch
+        - alert: IaaSDeploymentReplicasMismatch
+          annotations:
+            description: Deployment {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.deployment {{ "}}" }} has not matched the expected number of replicas for longer than 5 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentreplicasmismatch
+            summary: Deployment has not matched the expected number of replicas.
+          expr: |-
+            (
+              kube_deployment_spec_replicas{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+                >
+              kube_deployment_status_replicas_available{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+            ) and (
+              changes(kube_deployment_status_replicas_updated{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}[10m])
+                ==
+              0
+            )
+          for: 5m
+          labels:
+            severity: warning
+
+        ## IaaSStatefulSetReplicasMismatch
+        - alert: IaaSStatefulSetGenerationMismatch
+          annotations:
+            description: StatefulSet generation for {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.statefulset {{ "}}" }} does not match, this indicates that the StatefulSet has failed but has not been rolled back.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetgenerationmismatch
+            summary: StatefulSet generation mismatch due to possible roll-back
+          expr: |-
+            kube_statefulset_status_observed_generation{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+              !=
+            kube_statefulset_metadata_generation{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+          for: 5m
+          labels:
+            severity: warning
+
+        ## IaaSStatefulSetUpdateNotRolledOut
+        - alert: IaaSStatefulSetUpdateNotRolledOut
+          annotations:
+            description: StatefulSet {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.statefulset {{ "}}" }} update has not been rolled out.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+            summary: StatefulSet update has not been rolled out.
+          expr: |-
+            (
+              max without (revision) (
+                kube_statefulset_status_current_revision{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+                  unless
+                kube_statefulset_status_update_revision{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+              )
+                *
+              (
+                kube_statefulset_replicas{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+                  !=
+                kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}
+              )
+            ) and (
+              changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics", namespace=~"{{ .Values.matchNamespaces | join "|" }}"}[5m]) == 0
+            )
+          for: 5m
+          labels:
+            severity: warning

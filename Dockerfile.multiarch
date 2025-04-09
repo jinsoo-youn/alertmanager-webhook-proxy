@@ -1,0 +1,25 @@
+# 1단계: Go 앱 빌드
+FROM golang:1.24-alpine AS builder
+#ARG GOOS=linux
+#ARG GOARCH=amd64
+## glibc 의존성 제거, 완전한 정적 링크
+ENV CGO_ENABLED=0
+
+# 필요한 패키지 설치 (go build 에 필요한 경우)
+#RUN apk add --no-cache git
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# 빌드 실행 (-s: 심볼 테이블 및 기타 디버깅 정보 제거, DWARF 디버깅 정보 제거 -> 실행 파일의 크기를 줄일 수 있음)
+RUN go build -ldflags="-s -w" -o alertmanager-webhook-proxy ./cmd/alertmanager-webhook-proxy
+
+# 2단계: 경량 실행 이미지
+FROM alpine:3.21.3
+RUN apk add --no-cache ca-certificates
+WORKDIR /root/
+# 빌드된 바이너리만 복사
+COPY --from=builder /app/alertmanager-webhook-proxy .
+EXPOSE 8080
+ENTRYPOINT ["./alertmanager-webhook-proxy"]

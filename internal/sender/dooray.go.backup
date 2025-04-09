@@ -1,0 +1,162 @@
+package sender
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"git.toastoven.net/ToastCloudOps/alertmanager-webhook-proxy/internal/config"
+	"git.toastoven.net/ToastCloudOps/alertmanager-webhook-proxy/pkg/models"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+)
+
+type DooraySender struct {
+	Config *config.DoorayConfig
+}
+
+func (s *DooraySender) Name() string {
+	return "dooray"
+}
+
+func (s *DooraySender) Send(logger *slog.Logger, data *models.AlertmanagerData) error {
+	sender := s.Name()
+	events, err := s.buildDoorayEvents(data)
+	if err != nil {
+		logger.Error("failed to build dooray events", "sender", sender, "error", err)
+		return fmt.Errorf("failed to build dooray events: %w", err)
+	}
+
+	for cnt, event := range events {
+		body, err := json.Marshal(event)
+		if err != nil {
+			logger.Error("failed to marshal dooray event", "sender", sender, "error", err)
+			return fmt.Errorf("failed to marshal dooray event: %w", err)
+		}
+
+		req, err := http.NewRequest("POST", s.Config.WebhookURL, bytes.NewBuffer(body))
+		if err != nil {
+			logger.Error("failed to create HTTP request", "sender", sender, "error", err)
+			return fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			logger.Error("failed to send HTTP request", "sender", sender, "error", err)
+			return fmt.Errorf("failed to send HTTP request: %w", err)
+		}
+		if resp.Body != nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			logger.Error("dooray returned non-2xx status", "sender", sender, "status", resp.StatusCode)
+			return fmt.Errorf("dooray returned status %d", resp.StatusCode)
+		}
+
+		logger.Info("sent dooray event successfully", "sender", sender, "count", cnt+1, "total", len(events))
+	}
+
+	return nil
+}
+
+// DoorayEvent 구조체는 Dooray API의 payload 형식에 맞춘 이벤트 구조체
+type DoorayEvent struct {
+	Text        string             `json:"text"`
+	Attachments []DoorayAttachment `json:"attachments"`
+}
+
+type DoorayAttachment struct {
+	CallbackId string         `json:"callbackId,omitempty"`
+	Text       string         `json:"text,omitempty"`
+	Title      string         `json:"title,omitempty"`
+	TitleLink  string         `json:"titleLink,omitempty"`
+	AuthorName string         `json:"authorName,omitempty"`
+	AuthorLink string         `json:"authorLink,omitempty"`
+	ImageUrl   string         `json:"imageUrl,omitempty"`
+	ThumbUrl   string         `json:"thumbUrl,omitempty"`
+	Color      string         `json:"color,omitempty"`
+	Fields     []DoorayField  `json:"fields,omitempty"`
+	Actions    []DoorayAction `json:"actions,omitempty"`
+}
+
+type DoorayField struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
+}
+
+type DoorayAction struct {
+	Type       string         `json:"type"`
+	Text       string         `json:"text"`
+	Name       string         `json:"name"`
+	Value      string         `json:"value"`
+	Style      string         `json:"style,omitempty"`
+	Options    []DoorayOption `json:"options,omitempty"`
+	DataSource string         `json:"dataSource,omitempty"`
+}
+
+type DoorayOption struct {
+	Text  string `json:"text"`
+	Value string `json:"value"`
+}
+
+func severityToColor(severity string, status string) string {
+	if strings.EqualFold(status, "resolved") {
+		return "green" // 초록
+	}
+	switch strings.ToUpper(severity) {
+	case "CRITICAL", "ERROR":
+		return "red" // 빨강
+	case "WARNING", "WARN":
+		return "orange" // 노랑
+	case "INFO", "OK":
+		return "green" // 초록
+	default:
+		return "green" // 기본 색상 (Dooray 기본 추천 색상)
+	}
+}
+
+// BuildDoorayEvents converts AlertmanagerData into a slice of DoorayEvent payloads.
+func (s *DooraySender) buildDoorayEvents(data *models.AlertmanagerData) ([]DoorayEvent, error) {
+	if len(data.Alerts) == 0 {
+		return nil, fmt.Errorf("no alerts found")
+	}
+
+	doorayEvents := make([]DoorayEvent, 0, len(data.Alerts))
+
+	environ := strings.ToUpper(s.Config.Region + "-" + s.Config.Stage)
+	authorName := fmt.Sprintf("[%s] Alertmanager-Webhook-Proxy", environ)
+
+	for _, alert := range data.Alerts {
+		severity := alert.Labels["severity"]
+		alertStatus := alert.Status
+		title := fmt.Sprintf("[%s][%s] %s - %s", strings.ToUpper(alertStatus), strings.ToUpper(severity), alert.Labels["instance"], alert.Labels["alertname"])
+
+		renderedText, err := renderTemplate(alert)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render alert template: %w", err)
+		}
+		event := DoorayEvent{
+			Text:        title,
+			Attachments: []DoorayAttachment{},
+		}
+
+		url := alert.GeneratorURL
+		attachment := DoorayAttachment{
+			Title:      title,
+			Text:       renderedText,
+			TitleLink:  url,
+			AuthorName: authorName,
+			Color:      severityToColor(severity, alert.Status),
+		}
+
+		event.Attachments = append(event.Attachments, attachment)
+		doorayEvents = append(doorayEvents, event)
+	}
+
+	return doorayEvents, nil
+}

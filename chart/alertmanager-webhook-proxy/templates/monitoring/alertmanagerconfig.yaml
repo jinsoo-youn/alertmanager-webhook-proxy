@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ include "alertmanager-webhook-proxy.fullname" . }}
+  labels:
+    release: prometheus
+    alertmanagerConfig: {{ include "alertmanager-webhook-proxy.fullname" . }}
+spec:
+  route:
+    groupBy: ['alertname']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 1h
+    matchers:
+      - name: namespace
+        value: "{{ .Values.matchNamespaces | join "|" }}"
+        matchType: "=~"
+    receiver: webhook-proxy
+  receivers:
+    - name: webhook-proxy
+      webhookConfigs:
+        - url: http://{{ .Release.Name }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/webhook
+          sendResolved: true

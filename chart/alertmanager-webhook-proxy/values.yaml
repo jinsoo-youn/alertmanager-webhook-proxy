@@ -1,0 +1,146 @@
+# Default values for alertmanager-webhook-proxy.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+fullnameOverride: "alertmanager-webhook-proxy"
+nameOverride: "alertmanager-webhook-proxy"
+
+monitoring:
+  matchNamespaces:
+    - aodh
+    - bilingbatch
+    - ceilometer
+    - cinder
+    - gnocchi
+    - heat
+    - iaas-addons
+    - keystone
+    - memcached
+    - mistral
+    - nova
+    - rmq
+    - addons
+    - magnum
+    - barbican
+    - goblin-meter
+    - neutron-server
+    - canister
+    - cerebro
+    - iaas-nas
+    - iaas-nas-v1
+    - kibana
+
+env:
+  LISTEN_ADDRESS: "0.0.0.0:8080"
+  LOG_LEVEL: "info"
+  STAGE: "beta"
+  REGION: "kr2"
+  WARD_ENABLE: "true"
+  WARD_EVENT_URL: "https://ward-url/event"
+  WARD_ACTOR: "buoy"
+  DOORAY_ENABLE: "true"
+  DOORAY_WEBHOOK_URL: "https://dooray-url"
+
+replicaCount: 1
+
+image:
+  repository: beta-harbor-kr1.cloud.toastoven.net/library/alertmanager-webhook-proxy
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v0.0.2"
+
+imagePullSecrets: []
+
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources:
+   limits:
+     memory: 32Mi
+   requests:
+     cpu: 50m
+     memory: 32Mi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts: []
+# - name: foo
+#   mountPath: "/etc/foo"
+#   readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/<node-role>
+              operator: Exists

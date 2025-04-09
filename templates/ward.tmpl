@@ -1,0 +1,11 @@
+{
+  "actor": "{{.Actor }}",
+  "region": "{{.Region }}",
+  "env": "public",
+  "target_hostname": "{{.Labels.namespace}}",
+  "subject": "{{.Labels.alertname}}",
+  "severity": "{{.Labels.severity }}",
+  "description": "요약 : {{.Annotations.summary}}\n내용 : {{.Annotations.description}}\n\n라벨 :\n{{- range $k, $v := .Labels}}  - {{$k}}: {{$v}}\n{{end}}\n발생시간 : {{.StartsAt.Format "2006-01-02 15:04:05"}}{{if eq .Status "resolved"}}\n종료시간 : {{.EndsAt.Format "2006-01-02 15:04:05"}}{{end}}",
+  "contentUrl": "{{.GeneratorURL}}",
+  "occurred_at": "{{.OccurredAt.Format "2006-01-02 15:04:05"}}"
+}

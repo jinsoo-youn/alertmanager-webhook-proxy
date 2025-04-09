@@ -1,0 +1,12 @@
+{
+  "text": "[{{ .Stage }}][{{ .Labels.severity }}] {{ .Labels.alertname }} ({{ .Labels.instance }})",
+  "attachments": [
+    {
+      "title": "[{{ .Status }}] {{ .Labels.alertname }}",
+      "text": "요약 : {{ .Annotations.summary }}\n내용 : {{ .Annotations.description }}\n\n라벨 :\n{{- range $k, $v := .Labels}}  - {{$k}}: {{$v}}\n{{end}}\n발생시간 : {{ .StartsAt.Format "2006-01-02 15:04:05" }}{{ if eq .Status "resolved" }}\n종료시간 : {{ .EndsAt.Format "2006-01-02 15:04:05" }}{{ end }}",
+      "color": "{{ .Color }}",
+      "authorName": "[{{ .Region }}-{{ .Stage }}] Alertmanager-Webhook-Proxy",
+      "titleLink": "{{ .GeneratorURL }}"
+    }
+  ]
+}

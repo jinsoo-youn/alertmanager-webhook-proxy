@@ -1,0 +1,89 @@
+{
+  "version": "4",
+  "groupKey": "alertname=HighCPUUsage",
+  "status": "firing",
+  "receiver": "webhook",
+  "groupLabels": {
+    "alertname": "HighCPUUsage"
+  },
+  "commonLabels": {
+    "alertname": "TEST_ALERT_JINSOO",
+    "instance": "node01.example.com",
+    "severity": "critical"
+  },
+  "commonAnnotations": {
+    "summary": "CPU usage is over 90% for 5m",
+    "description": "JINSOO 테스트 이벤트 입니다."
+  },
+  "externalURL": "https://beta-prometheus-ook-kr2-t1-cloud.toastoven.net",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighCPUUsage",
+        "instance": "node01.example.com",
+        "severity": "critical",
+        "namespace": "test",
+        "pod": "test-pod",
+        "container": "test-container"
+      },
+      "annotations": {
+        "summary": "CPU usage is over 90%",
+        "description": "More than 90% CPU usage detected for over 5 minutes."
+      },
+      "startsAt": "2025-04-03T14:30:00Z",
+      "endsAt": "2025-04-03T14:21:00Z",
+      "generatorURL": "https://beta-prometheus-ook-kr2-t1-cloud.toastoven.net"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighMemoryUsage",
+        "instance": "node02.example.com",
+        "severity": "warning",
+        "namespace": "test-2"
+      },
+      "annotations": {
+        "summary": "Memory usage is over 80%",
+        "description": "More than 80% memory usage detected for over 10 minutes."
+      },
+      "startsAt": "2025-04-03T14:30:00Z",
+      "endsAt": "2025-04-03T14:21:00Z",
+      "generatorURL": "https://beta-prometheus-ook-kr2-t1-cloud.toastoven.net"
+    },
+    {
+      "status": "resolved",
+      "labels": {
+        "alertname": "DiskSpaceLow",
+        "instance": "node03.example.com",
+        "severity": "info",
+        "resolved": "true",
+        "namespace": "test-3"
+      },
+      "annotations": {
+        "summary": "Disk space is low",
+        "description": "Less than 10% disk space available."
+      },
+      "startsAt": "2025-04-03T14:30:00Z",
+      "endsAt": "2025-04-03T14:21:00Z",
+      "generatorURL": "https://beta-prometheus-ook-kr2-t1-cloud.toastoven.net"
+    },
+    {
+      "status": "resolved",
+      "labels": {
+        "alertname": "DiskSpaceLow",
+        "instance": "node03.example.com",
+        "severity": "error",
+        "resolved": "true",
+        "namespace": "test-4"
+      },
+      "annotations": {
+        "summary": "Disk space is low",
+        "description": "Less than 10% disk space available."
+      },
+      "startsAt": "2025-04-03T14:30:00Z",
+      "endsAt": "2025-04-03T14:21:00Z",
+      "generatorURL": "https://beta-prometheus-ook-kr2-t1-cloud.toastoven.net"
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+package sender
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"git.toastoven.net/ToastCloudOps/alertmanager-webhook-proxy/internal/templating"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"git.toastoven.net/ToastCloudOps/alertmanager-webhook-proxy/internal/config"
+	"git.toastoven.net/ToastCloudOps/alertmanager-webhook-proxy/pkg/models"
+)
+
+type WardSender struct {
+	Config       *config.WardConfig
+	Tm           *templating.TemplateManager
+	TemplateName string
+}
+
+func (s *WardSender) Name() string {
+	return "ward"
+}
+
+func (s *WardSender) Send(logger *slog.Logger, data *models.AlertmanagerData) error {
+	sender := s.Name()
+	events, err := s.buildWardEvent(data)
+	if err != nil {
+		logger.Error("failed to build ward events", "sender", sender, "error", err)
+		return fmt.Errorf("failed to build ward events: %w", err)
+	}
+
+	numEvents := len(events)
+	for cnt, event := range events {
+		jsonData, err := json.Marshal(event)
+		if err != nil {
+			logger.Error("failed to marshal ward event", "sender", sender, "error", err)
+			return fmt.Errorf("failed to marshal ward event: %w", err)
+		}
+
+		req, err := http.NewRequest("POST", s.Config.EventURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			logger.Error("failed to create HTTP request", "sender", sender, "error", err)
+			return fmt.Errorf("failed to create HTTP request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			logger.Error("failed to send HTTP request", "sender", sender, "error", err)
+			return fmt.Errorf("failed to send HTTP request: %w", err)
+		}
+		if resp.Body != nil {
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			logger.Error("ward returned non-2xx status", "sender", sender, "status", resp.StatusCode)
+			return fmt.Errorf("[%d/%d] ward returned status %d", cnt, numEvents, resp.StatusCode)
+		}
+		logger.Info("ward event sent successfully", "sender", sender, "count", cnt+1, "total", numEvents)
+	}
+	return nil
+}
+
+type WardEvent struct {
+	Actor          string `json:"actor"`
+	Subject        string `json:"subject"`
+	Description    string `json:"description"`
+	Region         string `json:"region"`
+	Env            string `json:"env"`
+	Severity       string `json:"severity"`
+	TargetHostname string `json:"target_hostname,omitempty"`
+	ContentURL     string `json:"contentUrl,omitempty"`
+	OccurredAt     string `json:"occurred_at,omitempty"`
+}
+
+//type WardEvents []WardEvent
+
+// BuildWardEvent: AlertmanagerData → WardEvent 변환,
+func (s *WardSender) buildWardEvent(data *models.AlertmanagerData) ([]WardEvent, error) {
+	if len(data.Alerts) == 0 {
+		return nil, fmt.Errorf("no alerts found")
+	}
+
+	wardEvents := make([]WardEvent, 0, len(data.Alerts))
+
+	// AlertmanagerData의 Alerts 필드에서 각 Alert를 WardEvent로 변환
+	for _, alert := range data.Alerts {
+		wardEvent := WardEvent{
+			Env:    s.Config.Env,
+			Region: s.Config.Region,
+			Actor:  s.Config.Actor,
+		}
+		// 1) subject
+		subject := alert.Labels["alertname"]
+		if subject == "" {
+			subject = "unknown alert"
+		}
+		wardEvent.Subject = subject
+
+		// 2) description
+		description := alert.Annotations["description"]
+		if description == "" {
+			description = "no description provided"
+		}
+		summary := alert.Annotations["summary"]
+		if summary == "" {
+			summary = "no summary provided"
+		}
+		renderedText, err := renderTemplate(alert)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render alert template: %w", err)
+		}
+		wardEvent.Description = renderedText
+		//wardEvent.Description = summary + "\n" + description
+
+		// 3) severity 매핑
+		var severity string
+		switch strings.ToLower(alert.Labels["severity"]) {
+		case "critical":
+			severity = "CRITICAL"
+		case "error":
+			severity = "ERROR"
+		case "warning", "warn":
+			severity = "WARNING"
+		case "info", "informational":
+			severity = "INFO"
+		case "ok", "resolved":
+			severity = "OK"
+		case "", "none", "unknown":
+			severity = "NONE"
+		default:
+			severity = "NONE"
+		}
+		wardEvent.Severity = severity
+
+		// 4) hostname
+		hostname := alert.Labels["instance"]
+		if hostname == "" {
+			hostname = "unknown-host"
+		}
+		wardEvent.TargetHostname = hostname
+
+		// 5) contentUrl (마찬가지로 첫 alert의 generatorURL 사용)
+		var contentUrl string
+		if len(data.Alerts) > 0 {
+			contentUrl = alert.GeneratorURL
+		}
+		wardEvent.ContentURL = contentUrl
+
+		wardEvents = append(wardEvents, wardEvent)
+	}
+
+	return wardEvents, nil
+}
